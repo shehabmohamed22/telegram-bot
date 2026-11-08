@@ -88,27 +88,53 @@ def handle_text_input(message):
     )
 
 
-# استقبال الصور مع التعليق (Caption) للخصم الفوري الاحترافي
+# استقبال الصور وقراءتها تلقائياً (OCR)
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
   global accounts_data
-  caption = message.caption if message.caption else ""
+  bot.reply_to(
+      message, "🔍 جاري فحص الإيصال واستخراج البيانات تلقائياً..."
+  )
 
-  # البحث عن رقم الهاتف داخل الـ Caption المرفق مع الصورة
+  extracted_text = ""
+  try:
+    fileID = message.photo[-1].file_id
+    file_info = bot.get_file(fileID)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    image_path = "temp_receipt.jpg"
+    with open(image_path, "wb") as new_file:
+      new_file.write(downloaded_file)
+
+    # محاولة استخراج النصوص عبر pytesseract
+    try:
+      import pytesseract
+      from PIL import Image
+
+      extracted_text = pytesseract.image_to_string(Image.open(image_path))
+    except Exception:
+      pass
+  except Exception:
+    pass
+
+  caption = message.caption if message.caption else ""
+  full_text = extracted_text + " " + caption
+
+  # البحث عن رقم الحساب المطابق في القائمة المسجلة داخل نص الصورة
   matched_phone = None
   for phone in accounts_data.keys():
-    if phone in caption:
+    if phone in full_text:
       matched_phone = phone
       break
 
-  # استخراج المبالغ من الـ Caption
-  numbers = re.findall(r"\d+", caption.replace(",", ""))
+  # استخراج الأرقام من النص المكتشف في الصورة
+  numbers = re.findall(r"\d+", full_text.replace(",", ""))
   valid_amounts = [
       float(n) for n in numbers if n != matched_phone and float(n) > 0
   ]
 
   if matched_phone and valid_amounts:
-    deduct_amount = valid_amounts[-1]  # المبلغ المطلوب خصمه
+    deduct_amount = valid_amounts[-1]
 
     if accounts_data[matched_phone]["balance"] >= deduct_amount:
       accounts_data[matched_phone]["balance"] -= deduct_amount
@@ -131,10 +157,9 @@ def handle_receipt(message):
   else:
     bot.reply_to(
         message,
-        "⚠️ يرجى كتابة رقم الحساب والمبلغ في **تعليق الصورة (Caption)** عند إرسالها هكذا:\n"
-        "`01288375231`\n`18000`",
+        "⚠️ عذراً، لمُم استطع قراءة رقم الحساب أو المبلغ تلقائياً بدقة من الصورة.\n"
+        "💡 (ملاحظة: إذا كانت خطوط الصورة غير واضحة لمحرك القراءة، جرب إرسال الصورة مع كتابة الرقم والمبلغ في التعليق لمرة واحدة).",
         reply_markup=get_main_keyboard(),
-        parse_mode="Markdown",
     )
 
 
