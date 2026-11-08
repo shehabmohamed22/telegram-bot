@@ -2,11 +2,19 @@ import os
 import re
 import telebot
 from flask import Flask
+from openai import OpenAI
 from telebot import types
 
 TOKEN = "9129643719:AAHxxMGZmYvXQHIXYFCxUY88nbhWVPn6plQ"
 bot = telebot.TeleBot(TOKEN)
 server = Flask(__name__)
+
+# تم وضع مفتاح OpenAI الخاص بك هنا وجعله جاهزاً للعمل
+client = OpenAI(
+    api_key=(
+        "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"
+    )
+)
 
 accounts_data = {}
 
@@ -62,11 +70,12 @@ def handle_text_input(message):
       try:
         balance = float(lines[i + 1])
         name = lines[i + 2]
-        accounts_data[phone] = {"name": name, "balance": balance}
-        added_count += 1
-        i += 3
       except ValueError:
         i += 1
+        continue
+      accounts_data[phone] = {"name": name, "balance": balance}
+      added_count += 1
+      i += 3
 
     if added_count > 0:
       bot.reply_to(
@@ -85,18 +94,19 @@ def handle_text_input(message):
         message,
         "⚠️ يرجى إرسال البيانات بالترتيب:\nرقم الهاتف\nالمبلغ\nالاسم",
         reply_markup=get_main_keyboard(),
-    )
+      )
 
 
-# استقبال الصور وقراءتها تلقائياً (OCR)
+# قراءة الإيصالات واكتشاف الحساب والمبلغ عبر الذكاء الاصطناعي (GPT-4o)
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
   global accounts_data
   bot.reply_to(
-      message, "🔍 جاري فحص الإيصال واستخراج البيانات تلقائياً..."
+      message,
+      "🤖 جاري تحليل الإيصال بالذكاء الاصطناعي واستخراج البيانات...",
+      reply_markup=get_main_keyboard(),
   )
 
-  extracted_text = ""
   try:
     fileID = message.photo[-1].file_id
     file_info = bot.get_file(fileID)
@@ -106,59 +116,105 @@ def handle_receipt(message):
     with open(image_path, "wb") as new_file:
       new_file.write(downloaded_file)
 
-    # محاولة استخراج النصوص عبر pytesseract
-    try:
-      import pytesseract
-      from PIL import Image
+    import base64
 
-      extracted_text = pytesseract.image_to_string(Image.open(image_path))
-    except Exception:
-      pass
-  except Exception:
-    pass
+    def encode_image(image_path):
+      with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
 
-  caption = message.caption if message.caption else ""
-  full_text = extracted_text + " " + caption
+    base64_image = encode_image(image_path)
+    available_phones = list(accounts_data.keys())
 
-  # البحث عن رقم الحساب المطابق في القائمة المسجلة داخل نص الصورة
-  matched_phone = None
-  for phone in accounts_data.keys():
-    if phone in full_text:
-      matched_phone = phone
-      break
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an assistant that extracts financial transaction"
+                    " details from receipt images. Given the image and a list"
+                    " of valid phone numbers, find which phone number from the"
+                    " list appears in the receipt, and extract the transferred"
+                    " amount (as a number). Output strictly in format:"
+                    " PHONE: <number> | AMOUNT: <number>. If not found, output"
+                    " NOT_FOUND."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Here is the list of valid phone numbers to look"
+                            f" for: {available_phones}"
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        },
+                    },
+                ],
+            },
+        ],
+        max_tokens=100,
+    )
 
-  # استخراج الأرقام من النص المكتشف في الصورة
-  numbers = re.findall(r"\d+", full_text.replace(",", ""))
-  valid_amounts = [
-      float(n) for n in numbers if n != matched_phone and float(n) > 0
-  ]
+    result_text = response.choices[0].message.content.strip()
 
-  if matched_phone and valid_amounts:
-    deduct_amount = valid_amounts[-1]
-
-    if accounts_data[matched_phone]["balance"] >= deduct_amount:
-      accounts_data[matched_phone]["balance"] -= deduct_amount
-      name = accounts_data[matched_phone]["name"]
-      new_balance = accounts_data[matched_phone]["balance"]
-
+    if "NOT_FOUND" in result_text:
       bot.reply_to(
           message,
-          f"✅ تم خصم {deduct_amount} من ({matched_phone}) {name}\n"
-          f"💰 المبلغ الجديد: {new_balance}\n\n" + get_accounts_text(),
+          "⚠️ لم يتمكن الذكاء الاصطناعي من مطابقة رقم الحساب الموجود في القائمة مع هذا الإيصال.",
           reply_markup=get_main_keyboard(),
-          parse_mode="Markdown",
       )
+      return
+
+    phone_match = re.search(r"PHONE:\s*([^\s|]+)", result_text)
+    amount_match = re.search(r"AMOUNT:\s*([\d.]+)", result_text)
+
+    if phone_match and amount_match:
+      matched_phone = phone_match.group(1).strip()
+      deduct_amount = float(amount_match.group(1))
+
+      if matched_phone in accounts_data:
+        if accounts_data[matched_phone]["balance"] >= deduct_amount:
+          accounts_data[matched_phone]["balance"] -= deduct_amount
+          name = accounts_data[matched_phone]["name"]
+          new_balance = accounts_data[matched_phone]["balance"]
+
+          bot.reply_to(
+              message,
+              f"✅ تم خصم {deduct_amount} من ({matched_phone}) {name}\n"
+              f"💰 المبلغ الجديد: {new_balance}\n\n" + get_accounts_text(),
+              reply_markup=get_main_keyboard(),
+              parse_mode="Markdown",
+          )
+        else:
+          bot.reply_to(
+              message,
+              "⚠️ عذراً، المبلغ المطلوب خصمه أكبر من الرصيد المتاح في الحساب!",
+              reply_markup=get_main_keyboard(),
+          )
+      else:
+        bot.reply_to(
+            message,
+            "⚠️ الحساب المستخرج غير موجود في القائمة الحالية.",
+            reply_markup=get_main_keyboard(),
+        )
     else:
       bot.reply_to(
           message,
-          "⚠️ عذراً، المبلغ المراد خصمه أكبر من الرصيد المتاح لهذا الحساب!",
+          "⚠️ حدث خطأ في تحليل البيانات المستخرجة من الإيصال.",
           reply_markup=get_main_keyboard(),
       )
-  else:
+
+  except Exception as e:
     bot.reply_to(
         message,
-        "⚠️ عذراً، لمُم استطع قراءة رقم الحساب أو المبلغ تلقائياً بدقة من الصورة.\n"
-        "💡 (ملاحظة: إذا كانت خطوط الصورة غير واضحة لمحرك القراءة، جرب إرسال الصورة مع كتابة الرقم والمبلغ في التعليق لمرة واحدة).",
+        f"⚠️ حدث خطأ تقني: {str(e)}",
         reply_markup=get_main_keyboard(),
     )
 
