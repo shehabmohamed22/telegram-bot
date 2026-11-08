@@ -1,4 +1,4 @@
 PyTelegramBotAPI
 Flask
+openai
 Pillow
-pytesseract
