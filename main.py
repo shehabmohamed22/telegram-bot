@@ -3,11 +3,11 @@ import telebot
 from flask import Flask
 from telebot import types
 
-TOKEN = "9108440921:AAE1CBG23VAUkbdweShWBsl4k7lnDk8A_Sk"  # أو التوكن الجديد لو أنشأت بوت جديد
+TOKEN = "9108440921:AAE1CBG23VAUkbdweShWBsl4k7lnDk8A_Sk"
 bot = telebot.TeleBot(TOKEN)
 server = Flask(__name__)
 
-# قائمة فارغة لتخزين الأرقام والمبالغ التي ستدخلها أنت لاحقاً
+# تخزين الحسابات والأرصدة
 accounts_data = {}
 
 
@@ -15,7 +15,8 @@ def get_accounts_text():
   if not accounts_data:
     return (
         "📊 **Limits / القائمة الحالية:**\n\n"
-        "القائمة فارغة حالياً.\nأضف الحسابات والمبالغ للبدء."
+        "القائمة فارغة حالياً.\nأرسل القائمة بالشكل التالي:\n"
+        "`01234567891`\n`60000`\n`Name`"
     )
 
   text = "📊 **Limits / القائمة الحالية:**\n\n"
@@ -24,19 +25,13 @@ def get_accounts_text():
   return text
 
 
-# لوحة الأزرار التفاعلية نفس الشكل المطلوب
 def get_main_keyboard():
   markup = types.InlineKeyboardMarkup(row_width=2)
-  btn_deduct = types.InlineKeyboardButton("➖ خصم", callback_data="deduct")
+  btn_deduct = types.InlineKeyboardButton("➖ خصم يدوي", callback_data="deduct")
   btn_add = types.InlineKeyboardButton("➕ إضافة مبلغ", callback_data="add")
   btn_list = types.InlineKeyboardButton("📋 عرض القائمة", callback_data="show_list")
-  btn_undo = types.InlineKeyboardButton(
-      "↩️ تراجع عن الأخير", callback_data="undo"
-  )
   btn_clear = types.InlineKeyboardButton("🗑️ مسح الكل", callback_data="clear")
-  btn_extra = types.InlineKeyboardButton("📁 خيارات إضافية", callback_data="extra")
-
-  markup.add(btn_deduct, btn_add, btn_list, btn_undo, btn_clear, btn_extra)
+  markup.add(btn_deduct, btn_add, btn_list, btn_clear)
   return markup
 
 
@@ -50,7 +45,47 @@ def send_welcome(message):
   )
 
 
-# التعامل مع ضغطات الأزرار
+# استقبال القائمة النصية أو البيانات وإضافتها تلقائياً
+@bot.message_handler(
+    func=lambda message: not message.text.startswith("/") and message.photo is None
+)
+def handle_text_input(message):
+  global accounts_data
+  lines = message.text.strip().split("\n")
+
+  if len(lines) >= 3:
+    phone = lines[0].strip()
+    try:
+      balance = float(lines[1].strip())
+      name = lines[2].strip()
+      accounts_data[phone] = {"name": name, "balance": balance}
+      bot.reply_to(
+          message,
+          f"✅ تم إضافة الحساب بنجاح:\n`{phone}` - {balance}",
+          parse_mode="Markdown",
+          reply_markup=get_main_keyboard(),
+      )
+    except ValueError:
+      bot.reply_to(
+          message, "⚠️ خطأ في تنسيق المبلغ، تأكد أن السطر الثاني رقم صحيح."
+      )
+  else:
+    bot.reply_to(
+        message, "⚠️ أرسل البيانات بالترتيب: الرقم\nالمبلغ\nالاسم في كل رسالة."
+    )
+
+
+# استقبال الصور (الإيصالات) وقراءتها
+@bot.message_handler(content_types=["photo"])
+def handle_receipt(message):
+  bot.reply_to(
+      message,
+      "🔍 جاري قراءة الإيصال واستخراج الحساب والمبلغ...",
+      reply_markup=get_main_keyboard(),
+  )
+  # هنا سنقوم بتفعيل محرك قراءة الصور (OCR) وخصم المبلغ من الحساب المستخرج تلقائياً
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
   if call.data == "show_list":
@@ -73,7 +108,7 @@ def callback_query(call):
         parse_mode="Markdown",
     )
   else:
-    bot.answer_callback_query(call.id, "هذا الزر قيد الربط!")
+    bot.answer_callback_query(call.id, "قيد التفعيل...")
 
 
 @server.route("/")
