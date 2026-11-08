@@ -88,18 +88,17 @@ def handle_text_input(message):
       )
 
 
-# استقبال الصور ومعالجتها للخصم التلقائي
+# استقبال الصور (الإيصالات) وتطبيق الخصم الاحترافي
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
   global accounts_data
   bot.reply_to(
       message,
-      "🔍 جاري تحليل الإيصال...",
+      "🔍 جاري تحليل الإيصال والخصم تلقائياً...",
       reply_markup=get_main_keyboard(),
   )
 
   try:
-    # تحميل الصورة المرسلة
     fileID = message.photo[-1].file_id
     file_info = bot.get_file(fileID)
     downloaded_file = bot.download_file(file_info.file_path)
@@ -108,55 +107,69 @@ def handle_receipt(message):
     with open(image_path, "wb") as new_file:
       new_file.write(downloaded_file)
 
-    # استخدام مكتبة OCR لقراءة النص من الصورة إذا توفرت، أو محاكاة البحث عن الأرقام
+    extracted_text = ""
     try:
       import pytesseract
       from PIL import Image
 
-      text = pytesseract.image_to_string(Image.open(image_path))
+      extracted_text = pytesseract.image_to_string(Image.open(image_path))
     except Exception:
-      text = ""  # في حال عدم توفر مكتبة tesseract محلياً على السيرفر
+      pass
 
-    # البحث عن رقم هاتف ومبلغ داخل النص المستخرج أو التعليق المرفق مع الصورة
     caption = message.caption if message.caption else ""
-    full_text = text + " " + caption
+    full_search_text = extracted_text + " " + caption
 
-    # البحث عن رقم يبدأ بـ 01 ويتكون من 11 رقم ومبلغ مالي
-    found_phone = None
+    # البحث عن رقم الحساب المسجل المذكور داخل النص أو الصورة
+    matched_phone = None
     for phone in accounts_data.keys():
-      if phone in full_text:
-        found_phone = phone
+      if phone in full_search_text:
+        matched_phone = phone
         break
 
-    # استخراج المبلغ (أرقام مالية)
-    numbers = re.findall(r"\d+", full_text)
+    # استخراج الأرقام والمبالغ المالية من النص
+    numbers = re.findall(
+        r"\d+", full_search_text.replace(",", "")
+    )  # إزالة الفواصل لتسهيل القراءة
 
-    if found_phone and len(numbers) >= 2:
-      # محاولة تخمين المبلغ المحول
-      deduct_amount = float(
-          numbers[-1]
-      )  # افتراض أن آخر رقم ظاهر هو المبلغ غالباً
-      if accounts_data[found_phone]["balance"] >= deduct_amount:
-        accounts_data[found_phone]["balance"] -= deduct_amount
-        bot.reply_to(
-            message,
-            f"✅ تم الخصم بنجاح!\n\n📱 الحساب: `{found_phone}`\n💸 المبلغ المخصوم: {deduct_amount}\n💰 المتبقي: {accounts_data[found_phone]['balance']}\n\n"
-            + get_accounts_text(),
-            reply_markup=get_main_keyboard(),
-            parse_mode="Markdown",
-        )
+    if matched_phone and len(numbers) >= 1:
+      # اختيار المبلغ المناسب (افتراض أن المبلغ هو الأكبر أو آخر رقم ظاهر)
+      # سنبحث عن أرقام تمثل مبالغ مالية (عادة أكبر من 10 لتجنب الأرقام الصغيرة)
+      valid_amounts = [
+          float(n) for n in numbers if float(n) > 10 and n != matched_phone
+      ]
+
+      if valid_amounts:
+        deduct_amount = valid_amounts[-1]  # أخذ آخر مبلغ محول ظاهر في الإيصال
+
+        if accounts_data[matched_phone]["balance"] >= deduct_amount:
+          accounts_data[matched_phone]["balance"] -= deduct_amount
+          name = accounts_data[matched_phone]["name"]
+          new_balance = accounts_data[matched_phone]["balance"]
+
+          bot.reply_to(
+              message,
+              f"✅ تم خصم {deduct_amount} من ({matched_phone}) {name}\n"
+              f"💰 المبلغ الجديد: {new_balance}\n\n" + get_accounts_text(),
+              reply_markup=get_main_keyboard(),
+              parse_mode="Markdown",
+          )
+        else:
+          bot.reply_to(
+              message,
+              "⚠️ عذراً، المبلغ المراد خصمه أكبر من الرصيد المتاح لهذا الحساب!",
+              reply_markup=get_main_keyboard(),
+          )
       else:
         bot.reply_to(
             message,
-            "⚠️ المبلغ المراد خصمه أكبر من الرصيد المتاح في هذا الحساب!",
+            "⚠️ لم يتم التعرف على مبلغ التحويل بوضوح من الصورة.",
             reply_markup=get_main_keyboard(),
         )
     else:
-      # طريقة بديلة تفاعلية إذا لم يتعرف البوت على الرقم تلقائياً من الصورة بدقة
       bot.reply_to(
           message,
-          "⚠️ لم أستطع مطابقة رقم الحساب تلقائياً من الصورة بدقة.\n\n"
-          "💡 **نصيحة:** اكتب رقم الحساب والمبلغ في التعليق (Caption) مع الصورة هكذا:\n"
+          "⚠️ لم أتمكن من مطابقة رقم الحساب تلقائياً.\n"
+          "💡 يرجى كتابة رقم الحساب والمبلغ في تعليق الصورة هكذا:\n"
           "`01234567891`\n`500`",
           reply_markup=get_main_keyboard(),
           parse_mode="Markdown",
@@ -165,7 +178,7 @@ def handle_receipt(message):
   except Exception as e:
     bot.reply_to(
         message,
-        f"⚠️ حدث خطأ أثناء معالجة الصورة: {str(e)}",
+        f"⚠️ حدث خطأ أثناء معالجة الإيصال: {str(e)}",
         reply_markup=get_main_keyboard(),
     )
 
