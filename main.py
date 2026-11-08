@@ -85,101 +85,56 @@ def handle_text_input(message):
         message,
         "⚠️ يرجى إرسال البيانات بالترتيب:\nرقم الهاتف\nالمبلغ\nالاسم",
         reply_markup=get_main_keyboard(),
-      )
+    )
 
 
-# استقبال الصور (الإيصالات) وتطبيق الخصم الاحترافي
+# استقبال الصور مع التعليق (Caption) للخصم الفوري الاحترافي
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
   global accounts_data
-  bot.reply_to(
-      message,
-      "🔍 جاري تحليل الإيصال والخصم تلقائياً...",
-      reply_markup=get_main_keyboard(),
-  )
+  caption = message.caption if message.caption else ""
 
-  try:
-    fileID = message.photo[-1].file_id
-    file_info = bot.get_file(fileID)
-    downloaded_file = bot.download_file(file_info.file_path)
+  # البحث عن رقم الهاتف داخل الـ Caption المرفق مع الصورة
+  matched_phone = None
+  for phone in accounts_data.keys():
+    if phone in caption:
+      matched_phone = phone
+      break
 
-    image_path = "temp_receipt.jpg"
-    with open(image_path, "wb") as new_file:
-      new_file.write(downloaded_file)
+  # استخراج المبالغ من الـ Caption
+  numbers = re.findall(r"\d+", caption.replace(",", ""))
+  valid_amounts = [
+      float(n) for n in numbers if n != matched_phone and float(n) > 0
+  ]
 
-    extracted_text = ""
-    try:
-      import pytesseract
-      from PIL import Image
+  if matched_phone and valid_amounts:
+    deduct_amount = valid_amounts[-1]  # المبلغ المطلوب خصمه
 
-      extracted_text = pytesseract.image_to_string(Image.open(image_path))
-    except Exception:
-      pass
+    if accounts_data[matched_phone]["balance"] >= deduct_amount:
+      accounts_data[matched_phone]["balance"] -= deduct_amount
+      name = accounts_data[matched_phone]["name"]
+      new_balance = accounts_data[matched_phone]["balance"]
 
-    caption = message.caption if message.caption else ""
-    full_search_text = extracted_text + " " + caption
-
-    # البحث عن رقم الحساب المسجل المذكور داخل النص أو الصورة
-    matched_phone = None
-    for phone in accounts_data.keys():
-      if phone in full_search_text:
-        matched_phone = phone
-        break
-
-    # استخراج الأرقام والمبالغ المالية من النص
-    numbers = re.findall(
-        r"\d+", full_search_text.replace(",", "")
-    )  # إزالة الفواصل لتسهيل القراءة
-
-    if matched_phone and len(numbers) >= 1:
-      # اختيار المبلغ المناسب (افتراض أن المبلغ هو الأكبر أو آخر رقم ظاهر)
-      # سنبحث عن أرقام تمثل مبالغ مالية (عادة أكبر من 10 لتجنب الأرقام الصغيرة)
-      valid_amounts = [
-          float(n) for n in numbers if float(n) > 10 and n != matched_phone
-      ]
-
-      if valid_amounts:
-        deduct_amount = valid_amounts[-1]  # أخذ آخر مبلغ محول ظاهر في الإيصال
-
-        if accounts_data[matched_phone]["balance"] >= deduct_amount:
-          accounts_data[matched_phone]["balance"] -= deduct_amount
-          name = accounts_data[matched_phone]["name"]
-          new_balance = accounts_data[matched_phone]["balance"]
-
-          bot.reply_to(
-              message,
-              f"✅ تم خصم {deduct_amount} من ({matched_phone}) {name}\n"
-              f"💰 المبلغ الجديد: {new_balance}\n\n" + get_accounts_text(),
-              reply_markup=get_main_keyboard(),
-              parse_mode="Markdown",
-          )
-        else:
-          bot.reply_to(
-              message,
-              "⚠️ عذراً، المبلغ المراد خصمه أكبر من الرصيد المتاح لهذا الحساب!",
-              reply_markup=get_main_keyboard(),
-          )
-      else:
-        bot.reply_to(
-            message,
-            "⚠️ لم يتم التعرف على مبلغ التحويل بوضوح من الصورة.",
-            reply_markup=get_main_keyboard(),
-        )
-    else:
       bot.reply_to(
           message,
-          "⚠️ لم أتمكن من مطابقة رقم الحساب تلقائياً.\n"
-          "💡 يرجى كتابة رقم الحساب والمبلغ في تعليق الصورة هكذا:\n"
-          "`01234567891`\n`500`",
+          f"✅ تم خصم {deduct_amount} من ({matched_phone}) {name}\n"
+          f"💰 المبلغ الجديد: {new_balance}\n\n" + get_accounts_text(),
           reply_markup=get_main_keyboard(),
           parse_mode="Markdown",
       )
-
-  except Exception as e:
+    else:
+      bot.reply_to(
+          message,
+          "⚠️ عذراً، المبلغ المراد خصمه أكبر من الرصيد المتاح لهذا الحساب!",
+          reply_markup=get_main_keyboard(),
+      )
+  else:
     bot.reply_to(
         message,
-        f"⚠️ حدث خطأ أثناء معالجة الإيصال: {str(e)}",
+        "⚠️ يرجى كتابة رقم الحساب والمبلغ في **تعليق الصورة (Caption)** عند إرسالها هكذا:\n"
+        "`01288375231`\n`18000`",
         reply_markup=get_main_keyboard(),
+        parse_mode="Markdown",
     )
 
 
