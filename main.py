@@ -3,7 +3,7 @@ import telebot
 from flask import Flask
 from telebot import types
 
-# التوكن الجديد الخاص بك
+# التوكن الخاص بك
 TOKEN = "9129643719:AAHxxMGZmYvXQHIXYFCxUY88nbhWVPn6plQ"
 bot = telebot.TeleBot(TOKEN)
 server = Flask(__name__)
@@ -56,7 +56,6 @@ def handle_text_input(message):
       line.strip() for line in message.text.strip().split("\n") if line.strip()
   ]
 
-  # التأكد أن عدد الأسطر يقبل القسمة على 3 (رقم، مبلغ، اسم)
   if len(lines) >= 3:
     added_count = 0
     i = 0
@@ -69,7 +68,7 @@ def handle_text_input(message):
         added_count += 1
         i += 3
       except ValueError:
-        i += 1  - # تخطي السطر الخاطئ والمتابعة
+        i += 1
 
     if added_count > 0:
       bot.reply_to(
@@ -80,7 +79,7 @@ def handle_text_input(message):
     else:
       bot.reply_to(
           message,
-          "⚠️ تأكد من تنسيق الأرسال:\nالرقم\nالمبلغ\nالاسم",
+          "⚠️ تأكد من تنسيق الإرسال:\nالرقم\nالمبلغ\nالاسم",
           reply_markup=get_main_keyboard(),
       )
   else:
