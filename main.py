@@ -12,7 +12,7 @@ server = Flask(__name__)
 # تم وضع مفتاح OpenAI الخاص بك هنا وجعله جاهزاً للعمل
 client = OpenAI(
     api_key=(
-        "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"
+        "Sk-proj-G-Abhrx29tSTaHYD03yaKKsd525PXR7EdsO4qDHTotJcXQRC55-b2VY1Ql1TAYdcirTZf_EfvzT3BlbkFJiOFC4fyT7dUNqfvV1WZVZC5gR6zk4LA1eZ6Gxsoks8Ptar2gPMhyifCTDY-ue4-AZMSSSL7hUA"
     )
 )
 
