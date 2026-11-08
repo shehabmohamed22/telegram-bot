@@ -1,14 +1,13 @@
 import os
+import re
 import telebot
 from flask import Flask
 from telebot import types
 
-# التوكن الخاص بك
 TOKEN = "9129643719:AAHxxMGZmYvXQHIXYFCxUY88nbhWVPn6plQ"
 bot = telebot.TeleBot(TOKEN)
 server = Flask(__name__)
 
-# تخزين الحسابات والأرصدة
 accounts_data = {}
 
 
@@ -46,7 +45,6 @@ def send_welcome(message):
   )
 
 
-# استقبال القائمة النصية ومعالجة عدة حسابات دفعة واحدة
 @bot.message_handler(
     func=lambda message: not message.text.startswith("/") and message.photo is None
 )
@@ -87,17 +85,89 @@ def handle_text_input(message):
         message,
         "⚠️ يرجى إرسال البيانات بالترتيب:\nرقم الهاتف\nالمبلغ\nالاسم",
         reply_markup=get_main_keyboard(),
-    )
+      )
 
 
-# استقبال الصور (الإيصالات)
+# استقبال الصور ومعالجتها للخصم التلقائي
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
+  global accounts_data
   bot.reply_to(
       message,
-      "🔍 جاري قراءة الإيصال واستخراج الحساب والمبلغ...",
+      "🔍 جاري تحليل الإيصال...",
       reply_markup=get_main_keyboard(),
   )
+
+  try:
+    # تحميل الصورة المرسلة
+    fileID = message.photo[-1].file_id
+    file_info = bot.get_file(fileID)
+    downloaded_file = bot.download_file(file_info.file_path)
+
+    image_path = "temp_receipt.jpg"
+    with open(image_path, "wb") as new_file:
+      new_file.write(downloaded_file)
+
+    # استخدام مكتبة OCR لقراءة النص من الصورة إذا توفرت، أو محاكاة البحث عن الأرقام
+    try:
+      import pytesseract
+      from PIL import Image
+
+      text = pytesseract.image_to_string(Image.open(image_path))
+    except Exception:
+      text = ""  # في حال عدم توفر مكتبة tesseract محلياً على السيرفر
+
+    # البحث عن رقم هاتف ومبلغ داخل النص المستخرج أو التعليق المرفق مع الصورة
+    caption = message.caption if message.caption else ""
+    full_text = text + " " + caption
+
+    # البحث عن رقم يبدأ بـ 01 ويتكون من 11 رقم ومبلغ مالي
+    found_phone = None
+    for phone in accounts_data.keys():
+      if phone in full_text:
+        found_phone = phone
+        break
+
+    # استخراج المبلغ (أرقام مالية)
+    numbers = re.findall(r"\d+", full_text)
+
+    if found_phone and len(numbers) >= 2:
+      # محاولة تخمين المبلغ المحول
+      deduct_amount = float(
+          numbers[-1]
+      )  # افتراض أن آخر رقم ظاهر هو المبلغ غالباً
+      if accounts_data[found_phone]["balance"] >= deduct_amount:
+        accounts_data[found_phone]["balance"] -= deduct_amount
+        bot.reply_to(
+            message,
+            f"✅ تم الخصم بنجاح!\n\n📱 الحساب: `{found_phone}`\n💸 المبلغ المخصوم: {deduct_amount}\n💰 المتبقي: {accounts_data[found_phone]['balance']}\n\n"
+            + get_accounts_text(),
+            reply_markup=get_main_keyboard(),
+            parse_mode="Markdown",
+        )
+      else:
+        bot.reply_to(
+            message,
+            "⚠️ المبلغ المراد خصمه أكبر من الرصيد المتاح في هذا الحساب!",
+            reply_markup=get_main_keyboard(),
+        )
+    else:
+      # طريقة بديلة تفاعلية إذا لم يتعرف البوت على الرقم تلقائياً من الصورة بدقة
+      bot.reply_to(
+          message,
+          "⚠️ لم أستطع مطابقة رقم الحساب تلقائياً من الصورة بدقة.\n\n"
+          "💡 **نصيحة:** اكتب رقم الحساب والمبلغ في التعليق (Caption) مع الصورة هكذا:\n"
+          "`01234567891`\n`500`",
+          reply_markup=get_main_keyboard(),
+          parse_mode="Markdown",
+      )
+
+  except Exception as e:
+    bot.reply_to(
+        message,
+        f"⚠️ حدث خطأ أثناء معالجة الصورة: {str(e)}",
+        reply_markup=get_main_keyboard(),
+    )
 
 
 @bot.callback_query_handler(func=lambda call: True)
