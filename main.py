@@ -3,6 +3,7 @@ import telebot
 from flask import Flask
 from telebot import types
 
+# التوكن الجديد الخاص بك
 TOKEN = "9129643719:AAHxxMGZmYvXQHIXYFCxUY88nbhWVPn6plQ"
 bot = telebot.TeleBot(TOKEN)
 server = Flask(__name__)
@@ -15,7 +16,7 @@ def get_accounts_text():
   if not accounts_data:
     return (
         "📊 **Limits / القائمة الحالية:**\n\n"
-        "القائمة فارغة حالياً.\nأرسل القائمة بالشكل التالي:\n"
+        "القائمة فارغة حالياً.\nأرسل القائمة كاملة بالشكل التالي لكل حساب:\n"
         "`01234567891`\n`60000`\n`Name`"
     )
 
@@ -45,37 +46,52 @@ def send_welcome(message):
   )
 
 
-# استقبال القائمة النصية أو البيانات وإضافتها تلقائياً
+# استقبال القائمة النصية ومعالجة عدة حسابات دفعة واحدة
 @bot.message_handler(
     func=lambda message: not message.text.startswith("/") and message.photo is None
 )
 def handle_text_input(message):
   global accounts_data
-  lines = message.text.strip().split("\n")
+  lines = [
+      line.strip() for line in message.text.strip().split("\n") if line.strip()
+  ]
 
+  # التأكد أن عدد الأسطر يقبل القسمة على 3 (رقم، مبلغ، اسم)
   if len(lines) >= 3:
-    phone = lines[0].strip()
-    try:
-      balance = float(lines[1].strip())
-      name = lines[2].strip()
-      accounts_data[phone] = {"name": name, "balance": balance}
+    added_count = 0
+    i = 0
+    while i + 2 < len(lines):
+      phone = lines[i]
+      try:
+        balance = float(lines[i + 1])
+        name = lines[i + 2]
+        accounts_data[phone] = {"name": name, "balance": balance}
+        added_count += 1
+        i += 3
+      except ValueError:
+        i += 1  - # تخطي السطر الخاطئ والمتابعة
+
+    if added_count > 0:
       bot.reply_to(
           message,
-          f"✅ تم إضافة الحساب بنجاح:\n`{phone}` - {balance}",
-          parse_mode="Markdown",
+          f"✅ تم إضافة أو تحديث ({added_count}) حساب بنجاح!\nاضغط على 'عرض القائمة' لرؤيتها.",
           reply_markup=get_main_keyboard(),
       )
-    except ValueError:
+    else:
       bot.reply_to(
-          message, "⚠️ خطأ في تنسيق المبلغ، تأكد أن السطر الثاني رقم صحيح."
+          message,
+          "⚠️ تأكد من تنسيق الأرسال:\nالرقم\nالمبلغ\nالاسم",
+          reply_markup=get_main_keyboard(),
       )
   else:
     bot.reply_to(
-        message, "⚠️ أرسل البيانات بالترتيب: الرقم\nالمبلغ\nالاسم في كل رسالة."
+        message,
+        "⚠️ يرجى إرسال البيانات بالترتيب:\nرقم الهاتف\nالمبلغ\nالاسم",
+        reply_markup=get_main_keyboard(),
     )
 
 
-# استقبال الصور (الإيصالات) وقراءتها
+# استقبال الصور (الإيصالات)
 @bot.message_handler(content_types=["photo"])
 def handle_receipt(message):
   bot.reply_to(
@@ -83,7 +99,6 @@ def handle_receipt(message):
       "🔍 جاري قراءة الإيصال واستخراج الحساب والمبلغ...",
       reply_markup=get_main_keyboard(),
   )
-  # هنا سنقوم بتفعيل محرك قراءة الصور (OCR) وخصم المبلغ من الحساب المستخرج تلقائياً
 
 
 @bot.callback_query_handler(func=lambda call: True)
