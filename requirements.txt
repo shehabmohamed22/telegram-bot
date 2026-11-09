@@ -1,4 +1,4 @@
-PyTelegramBotAPI
+pyTelegramBotAPI
 Flask
-openai
-Pillow
+google-generativeai
+pillow
